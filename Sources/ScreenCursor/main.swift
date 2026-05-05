@@ -14,6 +14,7 @@ final class SettingsStore {
         static let radius = "radius"
         static let borderWidth = "borderWidth"
         static let innerOpacity = "innerOpacity"
+        static let clickFeedback = "clickFeedback"
         static let red = "colorRed"
         static let green = "colorGreen"
         static let blue = "colorBlue"
@@ -64,6 +65,19 @@ final class SettingsStore {
         }
         set {
             defaults.set(Double(min(max(newValue, 0), 1)), forKey: Key.innerOpacity)
+            postChange()
+        }
+    }
+
+    var clickFeedback: Bool {
+        get {
+            if defaults.object(forKey: Key.clickFeedback) == nil {
+                return true
+            }
+            return defaults.bool(forKey: Key.clickFeedback)
+        }
+        set {
+            defaults.set(newValue, forKey: Key.clickFeedback)
             postChange()
         }
     }
@@ -136,6 +150,8 @@ final class OverlayController {
     private let highlightView = HighlightView(frame: .zero)
     private var timer: Timer?
     private var lastWindowFrame = NSRect.zero
+    private var clickMonitor: Any?
+    private var animationStart: Date?
 
     init() {
         let diameter = (SettingsStore.shared.radius * 2) + 18
@@ -167,11 +183,18 @@ final class OverlayController {
             self?.tick()
         }
         RunLoop.main.add(timer!, forMode: .common)
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
+            self?.animateClickFeedback()
+        }
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
+        if let clickMonitor {
+            NSEvent.removeMonitor(clickMonitor)
+            self.clickMonitor = nil
+        }
         window.orderOut(nil)
     }
 
@@ -191,7 +214,7 @@ final class OverlayController {
     private func tick() {
         guard SettingsStore.shared.enabled else { return }
 
-        let radius = SettingsStore.shared.radius
+        let radius = currentRadius()
         let diameter = (radius * 2) + 18
         let mouse = NSEvent.mouseLocation
         let frame = NSRect(
@@ -206,6 +229,40 @@ final class OverlayController {
             lastWindowFrame = frame
         }
     }
+
+    private func animateClickFeedback() {
+        guard SettingsStore.shared.enabled, SettingsStore.shared.clickFeedback else { return }
+        animationStart = Date()
+    }
+
+    private func currentRadius() -> CGFloat {
+        let baseRadius = SettingsStore.shared.radius
+        guard SettingsStore.shared.clickFeedback, let animationStart else {
+            highlightView.radius = baseRadius
+            return baseRadius
+        }
+
+        let elapsed = Date().timeIntervalSince(animationStart)
+        let duration = 0.18
+
+        if elapsed >= duration {
+            self.animationStart = nil
+            highlightView.radius = baseRadius
+            return baseRadius
+        }
+
+        let progress = elapsed / duration
+        let scale: CGFloat
+        if progress < 0.35 {
+            scale = 1.0 - (CGFloat(progress / 0.35) * 0.13)
+        } else {
+            scale = 0.87 + (CGFloat((progress - 0.35) / 0.65) * 0.13)
+        }
+
+        let animatedRadius = baseRadius * scale
+        highlightView.radius = animatedRadius
+        return animatedRadius
+    }
 }
 
 final class SettingsWindowController: NSWindowController {
@@ -217,10 +274,11 @@ final class SettingsWindowController: NSWindowController {
     private let innerOpacityValueLabel = NSTextField(labelWithString: "")
     private let colorWell = NSColorWell(frame: .zero)
     private let enabledCheckbox = NSButton(checkboxWithTitle: "Enable highlight", target: nil, action: nil)
+    private let clickFeedbackCheckbox = NSButton(checkboxWithTitle: "Click feedback", target: nil, action: nil)
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 318),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 348),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -255,6 +313,9 @@ final class SettingsWindowController: NSWindowController {
 
         enabledCheckbox.target = self
         enabledCheckbox.action = #selector(enabledChanged)
+
+        clickFeedbackCheckbox.target = self
+        clickFeedbackCheckbox.action = #selector(clickFeedbackChanged)
 
         let radiusLabel = NSTextField(labelWithString: "Radius")
         radiusLabel.font = .systemFont(ofSize: 13, weight: .medium)
@@ -306,7 +367,8 @@ final class SettingsWindowController: NSWindowController {
             innerOpacitySlider,
             innerOpacityValueLabel,
             colorLabel,
-            colorWell
+            colorWell,
+            clickFeedbackCheckbox
         ].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview($0)
@@ -362,12 +424,16 @@ final class SettingsWindowController: NSWindowController {
             colorWell.centerYAnchor.constraint(equalTo: colorLabel.centerYAnchor),
             colorWell.leadingAnchor.constraint(equalTo: borderWidthSlider.leadingAnchor),
             colorWell.widthAnchor.constraint(equalToConstant: 74),
-            colorWell.heightAnchor.constraint(equalToConstant: 32)
+            colorWell.heightAnchor.constraint(equalToConstant: 32),
+
+            clickFeedbackCheckbox.topAnchor.constraint(equalTo: colorWell.bottomAnchor, constant: 22),
+            clickFeedbackCheckbox.leadingAnchor.constraint(equalTo: title.leadingAnchor)
         ])
     }
 
     @objc private func syncFromSettings() {
         enabledCheckbox.state = SettingsStore.shared.enabled ? .on : .off
+        clickFeedbackCheckbox.state = SettingsStore.shared.clickFeedback ? .on : .off
         radiusSlider.doubleValue = Double(SettingsStore.shared.radius)
         radiusValueLabel.stringValue = "\(Int(SettingsStore.shared.radius.rounded())) px"
         borderWidthSlider.doubleValue = Double(SettingsStore.shared.borderWidth)
@@ -379,6 +445,10 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func enabledChanged() {
         SettingsStore.shared.enabled = enabledCheckbox.state == .on
+    }
+
+    @objc private func clickFeedbackChanged() {
+        SettingsStore.shared.clickFeedback = clickFeedbackCheckbox.state == .on
     }
 
     @objc private func radiusChanged() {
