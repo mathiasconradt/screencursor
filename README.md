@@ -2,6 +2,8 @@
 
 Native macOS menu bar app that draws a configurable highlight circle around the cursor.
 
+<img src="docs/assets/screencursor.png" alt="Screen Cursor promo image" width="100%">
+
 ## Build
 
 ```sh
