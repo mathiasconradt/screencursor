@@ -51,6 +51,7 @@ Settings are saved with `UserDefaults`:
 - Highlight radius
 - Border width
 - Inner opacity
+- Click feedback
 - Highlight color, including alpha
 
 ## Notes
