@@ -297,7 +297,7 @@ final class SettingsWindowController: NSWindowController {
         )
     }
 
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -492,7 +492,7 @@ final class AboutWindowController: NSWindowController {
         buildContent()
     }
 
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -560,7 +560,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settingsWindowController = SettingsWindowController()
     private let aboutWindowController = AboutWindowController()
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_ _: Notification) {
         NSApp.setActivationPolicy(.accessory)
         configureStatusItem()
         overlayController.start()
@@ -600,7 +600,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         aboutWindowController.show()
     }
 
-    @objc private func toggleHighlight(_ sender: NSMenuItem) {
+    @objc private func toggleHighlight(_ _: NSMenuItem) {
         SettingsStore.shared.enabled.toggle()
     }
 
