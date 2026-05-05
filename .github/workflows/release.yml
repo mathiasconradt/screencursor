@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump patch version
+        id: version
+        run: |
+          current=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
+          IFS=. read -r major minor patch <<< "$current"
+          next="$major.$minor.$((patch + 1))"
+
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $next" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $next" Resources/Info.plist
+
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "zip=Screen-Cursor-$next.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Build release archive
+        run: make dist
+
+      - name: Update Homebrew cask
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          zip_path="dist/${{ steps.version.outputs.zip }}"
+          sha="$(shasum -a 256 "$zip_path" | awk '{print $1}')"
+
+          perl -0pi -e "s/version \"[^\"]+\"/version \"$version\"/" Casks/screen-cursor.rb
+          perl -0pi -e "s/sha256 (?::no_check|\"[a-f0-9]{64}\")/sha256 \"$sha\"/" Casks/screen-cursor.rb
+
+      - name: Commit version and cask update
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          git add Resources/Info.plist Casks/screen-cursor.rb
+          git commit -m "Release v$version"
+          git tag -a "v$version" -m "Screen Cursor v$version"
+          git push origin HEAD:main --follow-tags
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          zip_path="dist/${{ steps.version.outputs.zip }}"
+          gh release create "v$version" "$zip_path#Screen Cursor v$version" \
+            --title "Screen Cursor v$version" \
+            --generate-notes \
+            --verify-tag
