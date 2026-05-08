@@ -1,6 +1,6 @@
 # Screen Cursor
 
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=mathiasconradt_screencursor&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=mathiasconradt_screencursor)
+[![Build](https://github.com/mathiasconradt/screencursor/actions/workflows/build.yml/badge.svg)](https://github.com/mathiasconradt/screencursor/actions/workflows/build.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=mathiasconradt_screencursor&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=mathiasconradt_screencursor)
 
 Native macOS menu bar app that draws a configurable highlight circle around the cursor.
 
