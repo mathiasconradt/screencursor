@@ -1,4 +1,5 @@
 import Cocoa
+import ServiceManagement
 
 extension Notification.Name {
     static let screenCursorSettingsChanged = Notification.Name("ScreenCursor.settingsChanged")
@@ -275,10 +276,11 @@ final class SettingsWindowController: NSWindowController {
     private let colorWell = NSColorWell(frame: .zero)
     private let enabledCheckbox = NSButton(checkboxWithTitle: "Enable highlight", target: nil, action: nil)
     private let clickFeedbackCheckbox = NSButton(checkboxWithTitle: "Click feedback", target: nil, action: nil)
+    private let launchAtStartupCheckbox = NSButton(checkboxWithTitle: "Launch at startup", target: nil, action: nil)
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 348),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 390),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -316,6 +318,9 @@ final class SettingsWindowController: NSWindowController {
 
         clickFeedbackCheckbox.target = self
         clickFeedbackCheckbox.action = #selector(clickFeedbackChanged)
+
+        launchAtStartupCheckbox.target = self
+        launchAtStartupCheckbox.action = #selector(launchAtStartupChanged)
 
         let radiusLabel = NSTextField(labelWithString: "Radius")
         radiusLabel.font = .systemFont(ofSize: 13, weight: .medium)
@@ -368,7 +373,8 @@ final class SettingsWindowController: NSWindowController {
             innerOpacityValueLabel,
             colorLabel,
             colorWell,
-            clickFeedbackCheckbox
+            clickFeedbackCheckbox,
+            launchAtStartupCheckbox
         ].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview($0)
@@ -427,13 +433,17 @@ final class SettingsWindowController: NSWindowController {
             colorWell.heightAnchor.constraint(equalToConstant: 32),
 
             clickFeedbackCheckbox.topAnchor.constraint(equalTo: colorWell.bottomAnchor, constant: 22),
-            clickFeedbackCheckbox.leadingAnchor.constraint(equalTo: title.leadingAnchor)
+            clickFeedbackCheckbox.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+
+            launchAtStartupCheckbox.topAnchor.constraint(equalTo: clickFeedbackCheckbox.bottomAnchor, constant: 14),
+            launchAtStartupCheckbox.leadingAnchor.constraint(equalTo: title.leadingAnchor)
         ])
     }
 
     @objc private func syncFromSettings() {
         enabledCheckbox.state = SettingsStore.shared.enabled ? .on : .off
         clickFeedbackCheckbox.state = SettingsStore.shared.clickFeedback ? .on : .off
+        launchAtStartupCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
         radiusSlider.doubleValue = Double(SettingsStore.shared.radius)
         radiusValueLabel.stringValue = "\(Int(SettingsStore.shared.radius.rounded())) px"
         borderWidthSlider.doubleValue = Double(SettingsStore.shared.borderWidth)
@@ -449,6 +459,18 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func clickFeedbackChanged() {
         SettingsStore.shared.clickFeedback = clickFeedbackCheckbox.state == .on
+    }
+
+    @objc private func launchAtStartupChanged() {
+        do {
+            if launchAtStartupCheckbox.state == .on {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            launchAtStartupCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        }
     }
 
     @objc private func radiusChanged() {
