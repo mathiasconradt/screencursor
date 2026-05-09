@@ -25,6 +25,7 @@ make run
 ```
 
 Use the pointer icon in the menu bar to open settings, toggle the highlight, or quit.
+Press `Option-H` to toggle the highlight globally, even when another app is focused.
 
 ## Release Zip
 
@@ -65,6 +66,7 @@ swiftc -target arm64-apple-macos13.0
 ```
 
 No screen recording or accessibility permission is required for the highlight overlay because the app only reads the current mouse location and draws its own click-through window.
+No accessibility permission is required for the global `Option-H` hotkey because it is registered with macOS as an application hotkey.
 
 ## License
 

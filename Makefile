@@ -14,7 +14,7 @@ ZIP_PATH := $(DIST_DIR)/$(ZIP_NAME)
 
 all: $(SOURCES) $(INFO_PLIST)
 	mkdir -p "$(APP_BUNDLE)/Contents/MacOS" "$(APP_BUNDLE)/Contents/Resources"
-	swiftc -O -target arm64-apple-macos13.0 -framework Cocoa "$(SOURCES)" -o "$(EXECUTABLE)"
+	swiftc -O -target arm64-apple-macos13.0 -framework Cocoa -framework Carbon "$(SOURCES)" -o "$(EXECUTABLE)"
 	cp "$(INFO_PLIST)" "$(APP_BUNDLE)/Contents/Info.plist"
 
 dist: clean all

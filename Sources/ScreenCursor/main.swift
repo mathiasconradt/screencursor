@@ -1,8 +1,79 @@
 import Cocoa
+import Carbon.HIToolbox
 import ServiceManagement
 
 extension Notification.Name {
     static let screenCursorSettingsChanged = Notification.Name("ScreenCursor.settingsChanged")
+}
+
+private enum HotKey {
+    static let toggleKeyCode = UInt32(kVK_ANSI_H)
+    static let toggleModifiers = UInt32(optionKey)
+    static let toggleDescription = "\u{2325}H"
+}
+
+final class GlobalHotKey {
+    private var eventHandler: EventHandlerRef?
+    private var hotKey: EventHotKeyRef?
+    private let action: () -> Void
+
+    init(keyCode: UInt32, modifiers: UInt32, action: @escaping () -> Void) {
+        self.action = action
+
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        let handlerStatus = InstallEventHandler(
+            GetApplicationEventTarget(),
+            { _, _, context in
+                guard let context else { return noErr }
+                let hotKey = Unmanaged<GlobalHotKey>.fromOpaque(context).takeUnretainedValue()
+                DispatchQueue.main.async {
+                    hotKey.action()
+                }
+                return noErr
+            },
+            1,
+            &eventType,
+            context,
+            &eventHandler
+        )
+
+        guard handlerStatus == noErr else {
+            NSLog("Screen Cursor failed to install hotkey handler: \(handlerStatus)")
+            return
+        }
+
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: 1)
+        let registerStatus = RegisterEventHotKey(
+            keyCode,
+            modifiers,
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &hotKey
+        )
+
+        if registerStatus != noErr {
+            NSLog("Screen Cursor failed to register \(HotKey.toggleDescription): \(registerStatus)")
+        }
+    }
+
+    deinit {
+        if let hotKey {
+            UnregisterEventHotKey(hotKey)
+        }
+        if let eventHandler {
+            RemoveEventHandler(eventHandler)
+        }
+    }
+
+    private static let signature: OSType = {
+        let scalars = Array("ScrC".unicodeScalars)
+        return scalars.reduce(OSType(0)) { ($0 << 8) + OSType($1.value) }
+    }()
 }
 
 final class SettingsStore {
@@ -581,10 +652,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let overlayController = OverlayController()
     private let settingsWindowController = SettingsWindowController()
     private let aboutWindowController = AboutWindowController()
+    private var toggleHotKey: GlobalHotKey?
 
     func applicationDidFinishLaunching(_ _: Notification) {
         NSApp.setActivationPolicy(.accessory)
         configureStatusItem()
+        toggleHotKey = GlobalHotKey(
+            keyCode: HotKey.toggleKeyCode,
+            modifiers: HotKey.toggleModifiers
+        ) { [weak self] in
+            self?.toggleHighlight()
+        }
         overlayController.start()
         NotificationCenter.default.addObserver(
             self,
@@ -603,7 +681,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "About", action: #selector(showAbout), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Show Settings", action: #selector(showSettings), keyEquivalent: ","))
-        let toggleItem = NSMenuItem(title: "", action: #selector(toggleHighlight), keyEquivalent: "")
+        let toggleItem = NSMenuItem(title: "", action: #selector(toggleHighlightFromMenu), keyEquivalent: "")
         menu.addItem(toggleItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Screen Cursor", action: #selector(quit), keyEquivalent: "q"))
@@ -622,12 +700,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         aboutWindowController.show()
     }
 
-    @objc private func toggleHighlight(_ _: NSMenuItem) {
+    @objc private func toggleHighlightFromMenu(_: NSMenuItem) {
+        toggleHighlight()
+    }
+
+    private func toggleHighlight() {
         SettingsStore.shared.enabled.toggle()
     }
 
     @objc private func refreshToggleTitle() {
-        toggleMenuItem?.title = SettingsStore.shared.enabled ? "Disable Highlight" : "Enable Highlight"
+        let action = SettingsStore.shared.enabled ? "Disable Highlight" : "Enable Highlight"
+        toggleMenuItem?.title = "\(action) (\(HotKey.toggleDescription))"
     }
 
     @objc private func quit() {
