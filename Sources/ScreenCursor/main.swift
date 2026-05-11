@@ -1,6 +1,7 @@
 import Cocoa
 import Carbon.HIToolbox
 import ServiceManagement
+import IOKit.pwr_mgt
 
 extension Notification.Name {
     static let screenCursorSettingsChanged = Notification.Name("ScreenCursor.settingsChanged")
@@ -206,6 +207,7 @@ final class JiggleController {
     private var pollTimer: Timer?
     private var lastMousePosition: NSPoint = .zero
     private var lastActivityAt: Date = Date()
+    private var assertionID: IOPMAssertionID = IOPMAssertionID(0)
 
     init() {
         NotificationCenter.default.addObserver(
@@ -225,6 +227,7 @@ final class JiggleController {
     func stop() {
         pollTimer?.invalidate()
         pollTimer = nil
+        releaseAssertion()
     }
 
     @objc private func settingsChanged() {
@@ -234,11 +237,31 @@ final class JiggleController {
     private func applySettings() {
         pollTimer?.invalidate()
         pollTimer = nil
-        guard SettingsStore.shared.jiggleEnabled else { return }
+        guard SettingsStore.shared.jiggleEnabled else {
+            releaseAssertion()
+            return
+        }
+        createAssertion()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.checkAndJiggle()
         }
         RunLoop.main.add(pollTimer!, forMode: .common)
+    }
+
+    private func createAssertion() {
+        releaseAssertion()
+        IOPMAssertionCreateWithName(
+            kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            "Screen Cursor Jiggle" as CFString,
+            &assertionID
+        )
+    }
+
+    private func releaseAssertion() {
+        guard assertionID != IOPMAssertionID(0) else { return }
+        IOPMAssertionRelease(assertionID)
+        assertionID = IOPMAssertionID(0)
     }
 
     private func checkAndJiggle() {
@@ -256,15 +279,47 @@ final class JiggleController {
 
     private func performJiggle() {
         guard let origin = CGEvent(source: nil)?.location else { return }
-        let steps: [(CGPoint, TimeInterval)] = [
-            (CGPoint(x: origin.x, y: origin.y - 1), 0.0),
-            (CGPoint(x: origin.x, y: origin.y + 1), 0.1),
-            (CGPoint(x: origin.x + 1, y: origin.y), 0.2),
-            (origin, 0.3),
-        ]
-        for (point, delay) in steps {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                CGWarpMouseCursorPosition(point)
+
+        var displayID = CGMainDisplayID()
+        var displayCount: UInt32 = 0
+        CGGetDisplaysWithPoint(origin, 1, &displayID, &displayCount)
+        let screen = CGDisplayBounds(displayID)
+
+        let delta: CGFloat = 150
+        let right = screen.maxX - origin.x
+        let left  = origin.x - screen.minX
+        let down  = screen.maxY - origin.y
+        let up    = origin.y - screen.minY
+
+        let dx: CGFloat
+        let dy: CGFloat
+        if right >= left && right >= down && right >= up {
+            dx = min(delta, right - 5); dy = 0
+        } else if left >= down && left >= up {
+            dx = -min(delta, left - 5); dy = 0
+        } else if down >= up {
+            dx = 0; dy = min(delta, down - 5)
+        } else {
+            dx = 0; dy = -min(delta, up - 5)
+        }
+
+        let steps = 20
+        let stepDelay = 0.025
+        let returnOffset = stepDelay * Double(steps) + 0.1
+
+        for i in 1...steps {
+            let t = CGFloat(i) / CGFloat(steps)
+            let pt = CGPoint(x: origin.x + dx * t, y: origin.y + dy * t)
+            DispatchQueue.main.asyncAfter(deadline: .now() + stepDelay * Double(i)) {
+                CGWarpMouseCursorPosition(pt)
+                CGAssociateMouseAndMouseCursorPosition(1)
+            }
+        }
+        for i in 1...steps {
+            let t = CGFloat(i) / CGFloat(steps)
+            let pt = CGPoint(x: origin.x + dx * (1.0 - t), y: origin.y + dy * (1.0 - t))
+            DispatchQueue.main.asyncAfter(deadline: .now() + returnOffset + stepDelay * Double(i)) {
+                CGWarpMouseCursorPosition(pt)
                 CGAssociateMouseAndMouseCursorPosition(1)
             }
         }
