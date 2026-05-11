@@ -56,6 +56,8 @@ Settings are saved with `UserDefaults`:
 - Inner opacity
 - Click feedback
 - Highlight color, including alpha
+- Jiggle enabled
+- Jiggle interval (seconds)
 
 ## Notes
 
@@ -67,6 +69,8 @@ swiftc -target arm64-apple-macos13.0
 
 No screen recording or accessibility permission is required for the highlight overlay because the app only reads the current mouse location and draws its own click-through window.
 No accessibility permission is required for the global `Option-H` hotkey because it is registered with macOS as an application hotkey.
+
+The jiggle feature uses `CGWarpMouseCursorPosition` to move the cursor, which also requires no accessibility permission. It only fires after the mouse has been idle for the configured interval — any user mouse movement resets the countdown.
 
 ## License
 
