@@ -91,6 +91,8 @@ final class SettingsStore {
         static let green = "colorGreen"
         static let blue = "colorBlue"
         static let alpha = "colorAlpha"
+        static let jiggleEnabled = "jiggleEnabled"
+        static let jiggleInterval = "jiggleInterval"
     }
 
     var enabled: Bool {
@@ -176,8 +178,80 @@ final class SettingsStore {
         }
     }
 
+    var jiggleEnabled: Bool {
+        get { defaults.bool(forKey: Key.jiggleEnabled) }
+        set {
+            defaults.set(newValue, forKey: Key.jiggleEnabled)
+            postChange()
+        }
+    }
+
+    var jiggleInterval: Int {
+        get {
+            let stored = defaults.integer(forKey: Key.jiggleInterval)
+            return stored > 0 ? stored : 180
+        }
+        set {
+            defaults.set(max(1, newValue), forKey: Key.jiggleInterval)
+            postChange()
+        }
+    }
+
     private func postChange() {
         NotificationCenter.default.post(name: .screenCursorSettingsChanged, object: self)
+    }
+}
+
+final class JiggleController {
+    private var timer: Timer?
+
+    init() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(settingsChanged),
+            name: .screenCursorSettingsChanged,
+            object: nil
+        )
+    }
+
+    func start() {
+        applySettings()
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    @objc private func settingsChanged() {
+        applySettings()
+    }
+
+    private func applySettings() {
+        timer?.invalidate()
+        timer = nil
+        guard SettingsStore.shared.jiggleEnabled else { return }
+        let interval = TimeInterval(SettingsStore.shared.jiggleInterval)
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.performJiggle()
+        }
+        RunLoop.main.add(timer!, forMode: .common)
+    }
+
+    private func performJiggle() {
+        guard let origin = CGEvent(source: nil)?.location else { return }
+        let steps: [(CGPoint, TimeInterval)] = [
+            (CGPoint(x: origin.x, y: origin.y - 1), 0.0),
+            (CGPoint(x: origin.x, y: origin.y + 1), 0.1),
+            (CGPoint(x: origin.x + 1, y: origin.y), 0.2),
+            (origin, 0.3),
+        ]
+        for (point, delay) in steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                CGWarpMouseCursorPosition(point)
+                CGAssociateMouseAndMouseCursorPosition(1)
+            }
+        }
     }
 }
 
@@ -348,10 +422,13 @@ final class SettingsWindowController: NSWindowController {
     private let enabledCheckbox = NSButton(checkboxWithTitle: "Enable highlight", target: nil, action: nil)
     private let clickFeedbackCheckbox = NSButton(checkboxWithTitle: "Click feedback", target: nil, action: nil)
     private let launchAtStartupCheckbox = NSButton(checkboxWithTitle: "Launch at startup", target: nil, action: nil)
+    private let jiggleCheckbox = NSButton(checkboxWithTitle: "Jiggle", target: nil, action: nil)
+    private let jiggleIntervalField = NSTextField(string: "180")
+    private let jiggleSecondsLabel = NSTextField(labelWithString: "s")
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 390),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 430),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -392,6 +469,19 @@ final class SettingsWindowController: NSWindowController {
 
         launchAtStartupCheckbox.target = self
         launchAtStartupCheckbox.action = #selector(launchAtStartupChanged)
+
+        jiggleCheckbox.target = self
+        jiggleCheckbox.action = #selector(jiggleChanged)
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .none
+        formatter.minimum = 1
+        jiggleIntervalField.formatter = formatter
+        jiggleIntervalField.alignment = .center
+        jiggleIntervalField.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        jiggleIntervalField.target = self
+        jiggleIntervalField.action = #selector(jiggleIntervalChanged)
+        jiggleIntervalField.delegate = self
 
         let radiusLabel = NSTextField(labelWithString: "Radius")
         radiusLabel.font = .systemFont(ofSize: 13, weight: .medium)
@@ -445,7 +535,10 @@ final class SettingsWindowController: NSWindowController {
             colorLabel,
             colorWell,
             clickFeedbackCheckbox,
-            launchAtStartupCheckbox
+            launchAtStartupCheckbox,
+            jiggleCheckbox,
+            jiggleIntervalField,
+            jiggleSecondsLabel
         ].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview($0)
@@ -506,7 +599,17 @@ final class SettingsWindowController: NSWindowController {
             clickFeedbackCheckbox.topAnchor.constraint(equalTo: colorWell.bottomAnchor, constant: 22),
             clickFeedbackCheckbox.leadingAnchor.constraint(equalTo: title.leadingAnchor),
 
-            launchAtStartupCheckbox.topAnchor.constraint(equalTo: clickFeedbackCheckbox.bottomAnchor, constant: 14),
+            jiggleCheckbox.topAnchor.constraint(equalTo: clickFeedbackCheckbox.bottomAnchor, constant: 14),
+            jiggleCheckbox.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+
+            jiggleSecondsLabel.centerYAnchor.constraint(equalTo: jiggleCheckbox.centerYAnchor),
+            jiggleSecondsLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
+
+            jiggleIntervalField.centerYAnchor.constraint(equalTo: jiggleCheckbox.centerYAnchor),
+            jiggleIntervalField.trailingAnchor.constraint(equalTo: jiggleSecondsLabel.leadingAnchor, constant: -4),
+            jiggleIntervalField.widthAnchor.constraint(equalToConstant: 55),
+
+            launchAtStartupCheckbox.topAnchor.constraint(equalTo: jiggleCheckbox.bottomAnchor, constant: 14),
             launchAtStartupCheckbox.leadingAnchor.constraint(equalTo: title.leadingAnchor)
         ])
     }
@@ -522,6 +625,9 @@ final class SettingsWindowController: NSWindowController {
         innerOpacitySlider.doubleValue = Double(SettingsStore.shared.innerOpacity)
         innerOpacityValueLabel.stringValue = "\(Int((SettingsStore.shared.innerOpacity * 100).rounded()))%"
         colorWell.color = SettingsStore.shared.color
+        jiggleCheckbox.state = SettingsStore.shared.jiggleEnabled ? .on : .off
+        jiggleIntervalField.stringValue = "\(SettingsStore.shared.jiggleInterval)"
+        jiggleIntervalField.isEnabled = SettingsStore.shared.jiggleEnabled
     }
 
     @objc private func enabledChanged() {
@@ -544,6 +650,17 @@ final class SettingsWindowController: NSWindowController {
         }
     }
 
+    @objc private func jiggleChanged() {
+        SettingsStore.shared.jiggleEnabled = jiggleCheckbox.state == .on
+        jiggleIntervalField.isEnabled = jiggleCheckbox.state == .on
+    }
+
+    @objc private func jiggleIntervalChanged() {
+        let value = Int(jiggleIntervalField.stringValue) ?? 180
+        SettingsStore.shared.jiggleInterval = value
+        jiggleIntervalField.stringValue = "\(SettingsStore.shared.jiggleInterval)"
+    }
+
     @objc private func radiusChanged() {
         SettingsStore.shared.radius = CGFloat(radiusSlider.doubleValue)
     }
@@ -564,6 +681,14 @@ final class SettingsWindowController: NSWindowController {
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+extension SettingsWindowController: NSTextFieldDelegate {
+    func controlTextDidEndEditing(_ obj: Notification) {
+        if let field = obj.object as? NSTextField, field === jiggleIntervalField {
+            jiggleIntervalChanged()
+        }
     }
 }
 
@@ -650,6 +775,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var toggleMenuItem: NSMenuItem?
     private let overlayController = OverlayController()
+    private let jiggleController = JiggleController()
     private let settingsWindowController = SettingsWindowController()
     private let aboutWindowController = AboutWindowController()
     private var toggleHotKey: GlobalHotKey?
@@ -664,6 +790,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.toggleHighlight()
         }
         overlayController.start()
+        jiggleController.start()
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(refreshToggleTitle),
@@ -715,6 +842,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quit() {
         overlayController.stop()
+        jiggleController.stop()
         NSApp.terminate(nil)
     }
 }
