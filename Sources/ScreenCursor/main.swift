@@ -203,7 +203,9 @@ final class SettingsStore {
 }
 
 final class JiggleController {
-    private var timer: Timer?
+    private var pollTimer: Timer?
+    private var lastMousePosition: NSPoint = .zero
+    private var lastActivityAt: Date = Date()
 
     init() {
         NotificationCenter.default.addObserver(
@@ -215,12 +217,14 @@ final class JiggleController {
     }
 
     func start() {
+        lastMousePosition = NSEvent.mouseLocation
+        lastActivityAt = Date()
         applySettings()
     }
 
     func stop() {
-        timer?.invalidate()
-        timer = nil
+        pollTimer?.invalidate()
+        pollTimer = nil
     }
 
     @objc private func settingsChanged() {
@@ -228,14 +232,26 @@ final class JiggleController {
     }
 
     private func applySettings() {
-        timer?.invalidate()
-        timer = nil
+        pollTimer?.invalidate()
+        pollTimer = nil
         guard SettingsStore.shared.jiggleEnabled else { return }
-        let interval = TimeInterval(SettingsStore.shared.jiggleInterval)
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            self?.performJiggle()
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.checkAndJiggle()
         }
-        RunLoop.main.add(timer!, forMode: .common)
+        RunLoop.main.add(pollTimer!, forMode: .common)
+    }
+
+    private func checkAndJiggle() {
+        let current = NSEvent.mouseLocation
+        if current != lastMousePosition {
+            lastMousePosition = current
+            lastActivityAt = Date()
+            return
+        }
+        let idle = Date().timeIntervalSince(lastActivityAt)
+        guard idle >= TimeInterval(SettingsStore.shared.jiggleInterval) else { return }
+        lastActivityAt = Date()
+        performJiggle()
     }
 
     private func performJiggle() {
