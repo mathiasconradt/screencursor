@@ -1,6 +1,6 @@
 cask "screen-cursor" do
-  version "1.0.9"
-  sha256 "97d4ce8e207e64263eecdd15d417a133c58f9333b81feb7bae31f65b1f546e10"
+  version "1.0.10"
+  sha256 "e92973470a4f5737d9e6c7fa53887e8e016458194ec01d3a7276bcc60d2b2429"
 
   url "https://github.com/mathiasconradt/screencursor/releases/download/v#{version}/Screen-Cursor-#{version}.zip"
   name "Screen Cursor"
