@@ -10,12 +10,13 @@ VERSION := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString
 ZIP_NAME := Screen-Cursor-$(VERSION).zip
 ZIP_PATH := $(DIST_DIR)/$(ZIP_NAME)
 
-.PHONY: all clean dist run
+.PHONY: all clean dist run icon
 
 all: $(SOURCES) $(INFO_PLIST)
 	mkdir -p "$(APP_BUNDLE)/Contents/MacOS" "$(APP_BUNDLE)/Contents/Resources"
 	swiftc -O -target arm64-apple-macos13.0 -framework Cocoa -framework Carbon "$(SOURCES)" -o "$(EXECUTABLE)"
 	cp "$(INFO_PLIST)" "$(APP_BUNDLE)/Contents/Info.plist"
+	cp "Resources/AppIcon.icns" "$(APP_BUNDLE)/Contents/Resources/"
 
 dist: clean all
 	mkdir -p "$(DIST_DIR)"
@@ -24,6 +25,11 @@ dist: clean all
 
 run: all
 	open "$(APP_BUNDLE)"
+
+icon:
+	swift scripts/generate_icon.swift
+	iconutil -c icns Resources/AppIcon.iconset -o Resources/AppIcon.icns
+	rm -rf Resources/AppIcon.iconset
 
 clean:
 	rm -rf "$(BUILD_DIR)" "$(DIST_DIR)"
