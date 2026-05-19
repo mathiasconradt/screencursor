@@ -48,6 +48,12 @@ brew tap mathiasconradt/screencursor https://github.com/mathiasconradt/screencur
 brew install --cask screen-cursor
 ```
 
+If you downloaded the zip manually and macOS says the app is damaged, run:
+
+```sh
+xattr -cr "/Applications/Screen Cursor.app"
+```
+
 Settings are saved with `UserDefaults`:
 
 - Highlight enabled

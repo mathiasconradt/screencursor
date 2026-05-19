@@ -10,7 +10,7 @@ VERSION := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString
 ZIP_NAME := Screen-Cursor-$(VERSION).zip
 ZIP_PATH := $(DIST_DIR)/$(ZIP_NAME)
 
-.PHONY: all clean dist run icon
+.PHONY: all clean dist zip run icon
 
 all: $(SOURCES) $(INFO_PLIST)
 	mkdir -p "$(APP_BUNDLE)/Contents/MacOS" "$(APP_BUNDLE)/Contents/Resources"
@@ -18,10 +18,12 @@ all: $(SOURCES) $(INFO_PLIST)
 	cp "$(INFO_PLIST)" "$(APP_BUNDLE)/Contents/Info.plist"
 	cp "Resources/AppIcon.icns" "$(APP_BUNDLE)/Contents/Resources/"
 
-dist: clean all
+zip:
 	mkdir -p "$(DIST_DIR)"
 	ditto -c -k --keepParent "$(APP_BUNDLE)" "$(ZIP_PATH)"
 	shasum -a 256 "$(ZIP_PATH)"
+
+dist: clean all zip
 
 run: all
 	open "$(APP_BUNDLE)"
