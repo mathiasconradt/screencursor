@@ -11,15 +11,20 @@ private enum HotKey {
     static let toggleKeyCode = UInt32(kVK_ANSI_H)
     static let toggleModifiers = UInt32(optionKey)
     static let toggleDescription = "\u{2325}H"
+    static let jiggleKeyCode = UInt32(kVK_ANSI_J)
+    static let jiggleModifiers = UInt32(optionKey)
+    static let jiggleDescription = "\u{2325}J"
 }
 
 final class GlobalHotKey {
     private var eventHandler: EventHandlerRef?
     private var hotKey: EventHotKeyRef?
     private let action: () -> Void
+    private let registeredID: UInt32
 
-    init(keyCode: UInt32, modifiers: UInt32, action: @escaping () -> Void) {
+    init(keyCode: UInt32, modifiers: UInt32, id: UInt32 = 1, description: String = "", action: @escaping () -> Void) {
         self.action = action
+        self.registeredID = id
 
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
@@ -28,12 +33,15 @@ final class GlobalHotKey {
         let context = Unmanaged.passUnretained(self).toOpaque()
         let handlerStatus = InstallEventHandler(
             GetApplicationEventTarget(),
-            { _, _, context in
-                guard let context else { return noErr }
-                let hotKey = Unmanaged<GlobalHotKey>.fromOpaque(context).takeUnretainedValue()
-                DispatchQueue.main.async {
-                    hotKey.action()
-                }
+            { _, event, context in
+                guard let context, let event else { return noErr }
+                let self_ = Unmanaged<GlobalHotKey>.fromOpaque(context).takeUnretainedValue()
+                var hkID = EventHotKeyID()
+                GetEventParameter(event, EventParamName(kEventParamDirectObject),
+                                  EventParamType(typeEventHotKeyID), nil,
+                                  MemoryLayout<EventHotKeyID>.size, nil, &hkID)
+                guard hkID.id == self_.registeredID else { return OSStatus(eventNotHandledErr) }
+                DispatchQueue.main.async { self_.action() }
                 return noErr
             },
             1,
@@ -47,7 +55,7 @@ final class GlobalHotKey {
             return
         }
 
-        let hotKeyID = EventHotKeyID(signature: Self.signature, id: 1)
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: id)
         let registerStatus = RegisterEventHotKey(
             keyCode,
             modifiers,
@@ -58,7 +66,7 @@ final class GlobalHotKey {
         )
 
         if registerStatus != noErr {
-            NSLog("Screen Cursor failed to register \(HotKey.toggleDescription): \(registerStatus)")
+            NSLog("Screen Cursor failed to register \(description): \(registerStatus)")
         }
     }
 
@@ -482,6 +490,72 @@ final class OverlayController {
     }
 }
 
+final class ToastController {
+    private var window: NSWindow?
+    private var hideTimer: Timer?
+
+    func show(_ message: String) {
+        hideTimer?.invalidate()
+        window?.orderOut(nil)
+        window = nil
+
+        let font = NSFont.systemFont(ofSize: 24, weight: .semibold)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let textSize = (message as NSString).size(withAttributes: attrs)
+        let hPad: CGFloat = 36
+        let vPad: CGFloat = 22
+        let width  = ceil(textSize.width)  + hPad * 2
+        let height = ceil(textSize.height) + vPad * 2
+
+        let screen = NSScreen.main ?? NSScreen.screens[0]
+        let sf = screen.frame
+        let winFrame = NSRect(x: sf.midX - width / 2, y: sf.midY - height / 2, width: width, height: height)
+
+        let win = NSWindow(
+            contentRect: winFrame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        win.backgroundColor = .clear
+        win.isOpaque = false
+        win.hasShadow = true
+        win.ignoresMouseEvents = true
+        win.level = .screenSaver
+        win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+
+        let container = NSView(frame: NSRect(origin: .zero, size: CGSize(width: width, height: height)))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor(white: 0.2, alpha: 0.82).cgColor
+        container.layer?.cornerRadius = 16
+
+        let label = NSTextField(labelWithString: message)
+        label.font = font
+        label.textColor = NSColor(white: 0.95, alpha: 1)
+        label.alignment = .center
+        label.frame = NSRect(x: 0, y: (height - ceil(textSize.height)) / 2,
+                             width: width, height: ceil(textSize.height))
+        container.addSubview(label)
+
+        win.contentView = container
+        win.alphaValue = 1
+        win.orderFrontRegardless()
+        window = win
+
+        hideTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
+            guard let win = self?.window else { return }
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.15
+                win.animator().alphaValue = 0
+            }, completionHandler: {
+                self?.window?.orderOut(nil)
+                self?.window = nil
+            })
+        }
+        RunLoop.main.add(hideTimer!, forMode: .common)
+    }
+}
+
 final class SettingsWindowController: NSWindowController {
     private let radiusSlider = NSSlider(value: Double(SettingsStore.shared.radius), minValue: 12, maxValue: 220, target: nil, action: nil)
     private let radiusValueLabel = NSTextField(labelWithString: "")
@@ -490,10 +564,10 @@ final class SettingsWindowController: NSWindowController {
     private let innerOpacitySlider = NSSlider(value: Double(SettingsStore.shared.innerOpacity), minValue: 0, maxValue: 1, target: nil, action: nil)
     private let innerOpacityValueLabel = NSTextField(labelWithString: "")
     private let colorWell = NSColorWell(frame: .zero)
-    private let enabledCheckbox = NSButton(checkboxWithTitle: "Enable highlight", target: nil, action: nil)
+    private let enabledCheckbox = NSButton(checkboxWithTitle: "Enable highlight (\(HotKey.toggleDescription))", target: nil, action: nil)
     private let clickFeedbackCheckbox = NSButton(checkboxWithTitle: "Click feedback", target: nil, action: nil)
     private let launchAtStartupCheckbox = NSButton(checkboxWithTitle: "Launch at startup", target: nil, action: nil)
-    private let jiggleCheckbox = NSButton(checkboxWithTitle: "Jiggle", target: nil, action: nil)
+    private let jiggleCheckbox = NSButton(checkboxWithTitle: "Jiggle (\(HotKey.jiggleDescription))", target: nil, action: nil)
     private let jiggleIntervalField = NSTextField(string: "180")
     private let jiggleSecondsLabel = NSTextField(labelWithString: "s")
 
@@ -845,20 +919,33 @@ final class AboutWindowController: NSWindowController {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var toggleMenuItem: NSMenuItem?
+    private var jiggleMenuItem: NSMenuItem?
     private let overlayController = OverlayController()
     private let jiggleController = JiggleController()
     private let settingsWindowController = SettingsWindowController()
     private let aboutWindowController = AboutWindowController()
     private var toggleHotKey: GlobalHotKey?
+    private var jiggleHotKey: GlobalHotKey?
+    private let toastController = ToastController()
 
     func applicationDidFinishLaunching(_ _: Notification) {
         NSApp.setActivationPolicy(.accessory)
         configureStatusItem()
         toggleHotKey = GlobalHotKey(
             keyCode: HotKey.toggleKeyCode,
-            modifiers: HotKey.toggleModifiers
+            modifiers: HotKey.toggleModifiers,
+            id: 1,
+            description: HotKey.toggleDescription
         ) { [weak self] in
             self?.toggleHighlight()
+        }
+        jiggleHotKey = GlobalHotKey(
+            keyCode: HotKey.jiggleKeyCode,
+            modifiers: HotKey.jiggleModifiers,
+            id: 2,
+            description: HotKey.jiggleDescription
+        ) { [weak self] in
+            self?.toggleJiggle()
         }
         overlayController.start()
         jiggleController.start()
@@ -881,11 +968,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Show Settings", action: #selector(showSettings), keyEquivalent: ","))
         let toggleItem = NSMenuItem(title: "", action: #selector(toggleHighlightFromMenu), keyEquivalent: "")
         menu.addItem(toggleItem)
+        let jiggleItem = NSMenuItem(title: "", action: #selector(toggleJiggleFromMenu), keyEquivalent: "")
+        menu.addItem(jiggleItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Screen Cursor", action: #selector(quit), keyEquivalent: "q"))
         menu.items.forEach { $0.target = self }
         item.menu = menu
         toggleMenuItem = toggleItem
+        jiggleMenuItem = jiggleItem
         refreshToggleTitle()
         statusItem = item
     }
@@ -902,13 +992,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleHighlight()
     }
 
+    @objc private func toggleJiggleFromMenu(_: NSMenuItem) {
+        toggleJiggle()
+    }
+
     private func toggleHighlight() {
         SettingsStore.shared.enabled.toggle()
+    }
+
+    private func toggleJiggle() {
+        SettingsStore.shared.jiggleEnabled.toggle()
+        toastController.show(SettingsStore.shared.jiggleEnabled ? "Jiggle on" : "Jiggle off")
     }
 
     @objc private func refreshToggleTitle() {
         let action = SettingsStore.shared.enabled ? "Disable Highlight" : "Enable Highlight"
         toggleMenuItem?.title = "\(action) (\(HotKey.toggleDescription))"
+        let jiggleAction = SettingsStore.shared.jiggleEnabled ? "Disable Jiggle" : "Enable Jiggle"
+        jiggleMenuItem?.title = "\(jiggleAction) (\(HotKey.jiggleDescription))"
     }
 
     @objc private func quit() {
