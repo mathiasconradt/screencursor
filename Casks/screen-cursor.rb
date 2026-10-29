@@ -16,10 +16,8 @@ cask "screen-cursor" do
 
   app "Screen Cursor.app"
 
-  preflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-cr", "#{staged_path}/Screen Cursor.app"],
-                   sudo: false
+  preflight_steps do
+    run "/usr/bin/xattr", args: ["-cr", "{{staged_path}}/Screen Cursor.app"]
   end
 
   zap trash: "~/Library/Preferences/com.local.ScreenCursor.plist"
